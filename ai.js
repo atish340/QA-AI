@@ -7,51 +7,67 @@ const client = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
 });
 
-export async function generateTestCases(issue, analysis) {
-    if (!issue.description) {
-        issue.description = "No description provided";
-    }
-
+export async function generateTestCases(issue) {
     const prompt = `
 You are a Senior QA Engineer.
 
-Use the analysis below to generate high-quality test cases.
+Jira Story:
+Title: ${issue.summary}
+Description: ${issue.description}
 
-Analysis:
-${JSON.stringify(analysis, null, 2)}
+Generate high-quality test cases.
 
-Instructions:
-- Cover Functional, Negative, Edge, Validation
-- Be realistic and specific
-- Avoid generic cases
+STRICT RULES:
+- ONLY return valid JSON
+- DO NOT include "json" word
+- DO NOT wrap in backticks
+- DO NOT add explanation
+- RETURN ONLY ARRAY
 
-Return JSON:
-
-{
-  "testCases": [
-    {
-      "id": "TC-01",
-      "type": "Functional | Negative | Edge | Validation",
-      "title": "",
-      "preconditions": "",
-      "steps": ["", ""],
-      "expectedResult": ""
-    }
-  ]
-}
+FORMAT:
+[
+  {
+    "title": "",
+    "steps": ["", ""],
+    "expected": "",
+    "type": "positive|negative|edge"
+  }
+]
 `;
 
     const response = await client.chat.completions.create({
-        model: "gpt-4o-mini",
+        model: "gpt-4.1-mini",
         messages: [{ role: "user", content: prompt }],
         temperature: 0.2,
-        max_tokens: 1500,
     });
 
+    let content = response.choices[0].message.content.trim();
+
+    // 🔥 CLEAN RESPONSE (handles ```json blocks)
+    content = content
+        .replace(/^```json/i, "")
+        .replace(/^```/, "")
+        .replace(/```$/, "")
+        .trim();
+
+    let parsed;
+
     try {
-        return JSON.parse(response.choices[0].message.content);
-    } catch {
+        parsed = JSON.parse(content);
+    } catch (err) {
         console.log("⚠️ JSON parse failed");
-        return response.choices[0].message.content;
+        console.log("Raw Output:\n", content);
+        throw new Error("Failed to parse test cases JSON");
     }
+
+    // 🔥 HANDLE BOTH FORMATS
+    if (Array.isArray(parsed)) {
+        return parsed;
+    }
+
+    if (parsed.testCases) {
+        return parsed.testCases;
+    }
+
+    throw new Error("Invalid JSON format from AI");
 }
