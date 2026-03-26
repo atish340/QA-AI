@@ -1,48 +1,42 @@
 import axios from "axios";
-import dotenv from "dotenv";
 
-dotenv.config();
+function extractText(description) {
+    if (!description || !description.content) return "No description";
+
+    return description.content
+        .map(block =>
+            block.content?.map(c => c.text).join(" ")
+        )
+        .join("\n");
+}
 
 export async function getJiraIssue(issueKey) {
+    const url = `${process.env.JIRA_BASE_URL}/rest/api/3/issue/${issueKey}`;
+
     try {
-        console.log("Fetching Jira issue...");
-
-        const auth = Buffer.from(
-            `${process.env.JIRA_EMAIL}:${process.env.JIRA_API_TOKEN}`
-        ).toString("base64");
-
-        // 🔍 Check API user
-        const me = await axios.get(
-            `${process.env.JIRA_BASE_URL}/rest/api/3/myself`,
-            {
-                headers: {
-                    Authorization: `Basic ${auth}`,
-                    Accept: "application/json",
-                },
-            }
-        );
-
-        console.log("API USER:", me.data.emailAddress);
-
-        // 🎯 Fetch Issue
-        const url = `${process.env.JIRA_BASE_URL}/rest/api/3/issue/${issueKey}`;
-
         const response = await axios.get(url, {
+            auth: {
+                username: process.env.JIRA_EMAIL,
+                password: process.env.JIRA_API_TOKEN,
+            },
             headers: {
-                Authorization: `Basic ${auth}`,
                 Accept: "application/json",
             },
         });
 
+        const fields = response.data.fields;
+
         return {
-            title: response.data.fields.summary,
-            description: response.data.fields.description,
+            key: issueKey,
+            summary: fields.summary,
+            description: extractText(fields.description),
+            issueType: fields.issuetype?.name,
+            status: fields.status?.name,
+            priority: fields.priority?.name,
         };
+
     } catch (error) {
-        console.error(
-            "Jira API Error:",
-            error.response?.data || error.message
-        );
+        console.error("Jira API Error:", error.response?.data || error.message);
         throw error;
     }
 }
