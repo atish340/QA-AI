@@ -8,57 +8,100 @@ const client = new OpenAI({
 });
 
 export async function analyzeStory(issue) {
-    const prompt = `
-You are a Senior QA Analyst with strong product understanding.
+    const start = Date.now();
 
-Analyze the Jira story deeply before creating test cases.
+    const response = await client.chat.completions.create({
+        model: "gpt-4.1-mini",
+        messages: [
+            {
+                role: "system",
+                content: "You are a senior QA analyst. Always return valid structured JSON."
+            },
+            {
+                role: "user",
+                content: `
+Analyze this Jira story:
 
-Jira Story:
 Title: ${issue.summary}
 Description: ${issue.description}
 
-Think like a QA and extract the following:
+Extract:
+- intent
+- userRoles
+- functionalities
+- businessRules
+- validations
+- risks
+- edgeCases
+- negativeScenarios
+- dependencies
+`
+            }
+        ],
 
-1. User Intent → What is the user trying to achieve?
-2. User Roles → Who will use this feature?
-3. Core Functionalities → Main flows of the feature
-4. Business Rules → Important conditions/logic
-5. Validation Points → Field validations, required checks
-6. Possible Risks → What can break in production
-7. Edge Cases → Boundary and unusual scenarios
-8. Negative Scenarios → Invalid inputs and failure cases
-9. Dependencies → APIs, DB, third-party services
+        // 🔥  STRUCTURED OUTPUT 
+        response_format: {
+            type: "json_schema",
+            json_schema: {
+                name: "analysis",
+                schema: {
+                    type: "object",
+                    properties: {
+                        intent: { type: "string" },
+                        userRoles: {
+                            type: "array",
+                            items: { type: "string" }
+                        },
+                        functionalities: {
+                            type: "array",
+                            items: { type: "string" }
+                        },
+                        businessRules: {
+                            type: "array",
+                            items: { type: "string" }
+                        },
+                        validations: {
+                            type: "array",
+                            items: { type: "string" }
+                        },
+                        risks: {
+                            type: "array",
+                            items: { type: "string" }
+                        },
+                        edgeCases: {
+                            type: "array",
+                            items: { type: "string" }
+                        },
+                        negativeScenarios: {
+                            type: "array",
+                            items: { type: "string" }
+                        },
+                        dependencies: {
+                            type: "array",
+                            items: { type: "string" }
+                        }
+                    },
+                    required: [
+                        "intent",
+                        "userRoles",
+                        "functionalities",
+                        "businessRules",
+                        "validations",
+                        "risks",
+                        "edgeCases",
+                        "negativeScenarios",
+                        "dependencies"
+                    ],
+                    additionalProperties: false
+                }
+            }
+        },
 
-IMPORTANT:
-- Be specific and realistic
-- Avoid generic statements
-- Think like testing a real product
-
-Return STRICT JSON ONLY:
-
-{
-  "intent": "",
-  "userRoles": [],
-  "functionalities": [],
-  "businessRules": [],
-  "validations": [],
-  "risks": [],
-  "edgeCases": [],
-  "negativeScenarios": [],
-  "dependencies": []
-}
-`;
-
-    const res = await client.chat.completions.create({
-        model: "gpt-4o-mini",
-        messages: [{ role: "user", content: prompt }],
         temperature: 0.2,
     });
 
-    try {
-        return JSON.parse(res.choices[0].message.content);
-    } catch (e) {
-        console.log("⚠️ Analyzer JSON parse failed, returning raw output");
-        return res.choices[0].message.content;
-    }
+    console.log(`⏱️ Analyzer API Time: ${Date.now() - start} ms`);
+
+    // ✅  VALID JSON
+    return response.choices[0].message.parsed;
 }

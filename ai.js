@@ -8,66 +8,130 @@ const client = new OpenAI({
 });
 
 export async function generateTestCases(issue) {
-    const prompt = `
-You are a Senior QA Engineer.
-
-Jira Story:
-Title: ${issue.summary}
-Description: ${issue.description}
-
-Generate high-quality test cases.
-
-STRICT RULES:
-- ONLY return valid JSON
-- DO NOT include "json" word
-- DO NOT wrap in backticks
-- DO NOT add explanation
-- RETURN ONLY ARRAY
-
-FORMAT:
-[
-  {
-    "title": "",
-    "steps": ["", ""],
-    "expected": "",
-    "type": "positive|negative|edge"
-  }
-]
-`;
-
-    const response = await client.chat.completions.create({
-        model: "gpt-4.1-mini",
-        messages: [{ role: "user", content: prompt }],
-        temperature: 0.2,
-    });
-
-    let content = response.choices[0].message.content.trim();
-
-    // 🔥 CLEAN RESPONSE (handles ```json blocks)
-    content = content
-        .replace(/^```json/i, "")
-        .replace(/^```/, "")
-        .replace(/```$/, "")
-        .trim();
-
-    let parsed;
+    const start = Date.now();
 
     try {
-        parsed = JSON.parse(content);
-    } catch (err) {
-        console.log("⚠️ JSON parse failed");
-        console.log("Raw Output:\n", content);
-        throw new Error("Failed to parse test cases JSON");
+        const response = await client.responses.create({
+            model: "gpt-4.1-mini",
+
+            input: [
+                {
+                    role: "system",
+                    content:
+                        "You are a senior QA engineer. Always return strictly valid JSON following the provided schema.",
+                },
+                {
+                    role: "user",
+                    content: `
+Generate test cases for this Jira story:
+
+Title: ${issue.summary}
+Description: ${issue.description}
+`,
+                },
+            ],
+
+            text: {
+                format: {
+                    type: "json_schema",
+                    name: "test_cases",
+                    schema: {
+                        type: "object",
+                        properties: {
+                            testCases: {
+                                type: "array",
+                                items: {
+                                    type: "object",
+                                    properties: {
+                                        title: { type: "string" },
+                                        steps: {
+                                            type: "array",
+                                            items: { type: "string" },
+                                        },
+                                        expected: { type: "string" },
+                                        type: {
+                                            type: "string",
+                                            enum: ["positive", "negative", "edge"],
+                                        },
+                                    },
+                                    required: ["title", "steps", "expected", "type"],
+                                    additionalProperties: false,
+                                },
+                            },
+                        },
+                        required: ["testCases"],
+                        additionalProperties: false,
+                    },
+                },
+            },
+        });
+
+        console.log(`⏱️ API Time: ${Date.now() - start} ms`);
+
+        const testCases = extractTestCases(response);
+
+        if (!testCases || !Array.isArray(testCases)) {
+            throw new Error("Invalid test case format after extraction");
+        }
+
+        console.log(`✅ Extracted ${testCases.length} test cases`);
+
+        return testCases;
+    } catch (error) {
+        console.error("❌ AI Error:", error.message);
+        throw error;
+    }
+}
+
+/**
+ * 🔥 UNIVERSAL PARSER
+ */
+function extractTestCases(response) {
+    let raw =
+        response.output_text ||
+        response.output?.[0]?.content?.[0]?.text ||
+        "";
+
+    if (!raw) {
+        throw new Error("Empty AI response");
     }
 
-    // 🔥 HANDLE BOTH FORMATS
-    if (Array.isArray(parsed)) {
-        return parsed;
+    // ✅ 1.  proper JSON
+    try {
+        const parsed = JSON.parse(raw);
+
+        if (Array.isArray(parsed)) return parsed;
+        if (parsed.testCases) return parsed.testCases;
+    } catch (e) {
+        // continue
     }
 
-    if (parsed.testCases) {
-        return parsed.testCases;
+    // ✅ 2.  fixing JSON
+    try {
+        const fixed = raw
+            .replace(/(\w+):/g, '"$1":') // quote keys
+            .replace(/'/g, '"') // single → double
+            .replace(/\n/g, " ");
+
+        const parsed = JSON.parse(fixed);
+
+        if (Array.isArray(parsed)) return parsed;
+        if (parsed.testCases) return parsed.testCases;
+    } catch (e) {
+        // continue
     }
 
-    throw new Error("Invalid JSON format from AI");
+    // ✅ 3. FINAL: evaluate JS object 
+    try {
+        const evaluated = new Function(`return ${raw}`)();
+
+        if (Array.isArray(evaluated)) return evaluated;
+        if (evaluated.testCases) return evaluated.testCases;
+    } catch (e) {
+        console.error("❌ FINAL PARSE FAILED");
+        console.log("RAW OUTPUT:\n", raw);
+        throw new Error("Failed to parse AI response");
+    }
+
+    throw new Error("No test cases found");
 }

@@ -21,30 +21,21 @@ async function run() {
         console.log(`📌 Issue: ${issue.summary}`);
 
         console.log("\n🧠 Analyzing story...");
-        const analysis = await analyzeStory(issue);
+        await analyzeStory(issue); // optional 
 
         console.log("✅ Analysis Done");
 
         console.log("\n🧪 Generating test cases...");
-        const testCasesRaw = await generateTestCases(issue, analysis);
 
-        // IMPORTANT: parse AI response
-        let testCases;
-        try {
-            testCases = JSON.parse(testCasesRaw);
-        } catch (e) {
-            console.error("❌ Failed to parse test cases JSON");
-            console.log("Raw Output:\n", testCasesRaw);
-            return;
-        }
+        // ✅RETURNS ARRAY
+        const testCases = await generateTestCases(issue);
 
         console.log(`✅ Generated ${testCases.length} test cases`);
 
         console.log("\n📤 Creating test cases in Jira...");
 
-        await createJiraTestCases(issue.key, {
-            testCases: testCases
-        });
+        // ✅ PASS ARRAY 
+        await createJiraTestCases(issue.key, testCases);
 
         console.log("\n🎉 DONE! Test cases created in Jira");
 
